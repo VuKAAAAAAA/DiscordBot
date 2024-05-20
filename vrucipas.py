@@ -5,6 +5,7 @@ import asyncio
 import yt_dlp
 from dotenv import load_dotenv
 from textwrap import dedent
+import urllib.parse, urllib.request, re
 
 def run_bot():
     # load .env file
@@ -20,6 +21,9 @@ def run_bot():
 
     queues = {}
     voice_clients = {}
+    yt_base_url = 'https://www.youtube.com/'
+    yt_results_url = yt_base_url + 'results?'
+    yt_watch_url = yt_base_url + 'watch?v='
     yt_dl_options ={'format': 'bestaudio/best'}
     ytdl = yt_dlp.YoutubeDL(yt_dl_options)
 
@@ -32,10 +36,11 @@ def run_bot():
     async def play_next(ctx):
         if queues[ctx.guild.id] != []:
             link = queues[ctx.guild.id].pop(0)
-            await play(ctx, link)
+            await play(ctx, link=link)
 
+    # * means you can add more words, not just one
     @client.command(name='play')
-    async def play(ctx, link):
+    async def play(ctx, *, link):
         try:
             voice_client = await ctx.author.voice.channel.connect()
             voice_clients[voice_client.guild.id] = voice_client
@@ -43,6 +48,18 @@ def run_bot():
             print(error)
 
         try:
+            if yt_base_url not in link:
+                query_string = urllib.parse.urlencode({
+                    'search_query': link
+                })
+
+                content = urllib.request.urlopen(
+                    yt_results_url + query_string
+                )
+
+                search_results = re.findall(r'/watch\?v=(.{11})', content.read().decode())
+                link = yt_watch_url + search_results[0]
+
             loop = asyncio.get_event_loop()
             data = await loop.run_in_executor(None, lambda: ytdl.extract_info(link, download=False))
                 
@@ -76,9 +93,18 @@ def run_bot():
                 del voice_clients[ctx.guild.id]
             except Exception as e:
                 print(e)
+        '''
+        @client.command(name='skip')
+        async def skip(ctx):
+            if ctx.guild.id.is_playing:
+                link = queues[ctx.guild.id].pop(0)
+                await ctx.send('Song skipped!')
+            else:
+                ctx.send("There is no song playing!")
+        '''
 
         @client.command(name='queue')
-        async def queue(ctx, url):
+        async def queue(ctx, *, url):
             if ctx.guild.id not in queues:
                 queues[ctx.guild.id] = []
             queues[ctx.guild.id].append(url)
