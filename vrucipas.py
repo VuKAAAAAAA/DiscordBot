@@ -1,4 +1,5 @@
 import discord
+from discord.ext import commands
 import os
 import asyncio
 import yt_dlp
@@ -15,7 +16,7 @@ def run_bot():
     # message_content is not enable by default
     intents.message_content = True
     # define client object
-    client = discord.Client(intents=intents)
+    client = commands.Bot(command_prefix='.', intents=intents)
 
     queues = {}
     voice_clients = {}
@@ -28,12 +29,71 @@ def run_bot():
     async def on_ready():
         print(f'{client.user} is now jamming')
 
-    @client.event
-    async def on_message(message):
-        if message.author == client.user:
-            return
+    async def play_next(ctx):
+        if queues[ctx.guild.id] != []:
+            link = queues[ctx.guild.id].pop(0)
+            await play(ctx, link)
 
-        if message.content.startswith('?help'):
+    @client.command(name='play')
+    async def play(ctx, link):
+        try:
+            voice_client = await ctx.author.voice.channel.connect()
+            voice_clients[voice_client.guild.id] = voice_client
+        except Exception as error:
+            print(error)
+
+        try:
+            loop = asyncio.get_event_loop()
+            data = await loop.run_in_executor(None, lambda: ytdl.extract_info(link, download=False))
+                
+            song = data['url']
+            player = discord.FFmpegOpusAudio(song, **ffmpeg_options)
+
+            # lambda is one line func
+            voice_clients[ctx.guild.id].play(player, after=lambda e: asyncio.run_coroutine_threadsafe(play_next(ctx), client.loop))
+        except Exception as error:
+            print(error)
+
+        @client.command(name='pause')
+        async def pause(ctx):
+            try:
+                voice_clients[ctx.guild.id].pause()
+            except Exception as e:
+                print(e)
+        
+        @client.command(name='resume')
+        async def resume(ctx):
+            try:
+                voice_clients[ctx.guild.id].resume()
+            except Exception as e:
+                print(e)
+
+        @client.command(name='stop')
+        async def stop(ctx):
+            try:
+                voice_clients[ctx.guild.id].stop()
+                await voice_clients[ctx.guild.id].disconnect()
+                del voice_clients[ctx.guild.id]
+            except Exception as e:
+                print(e)
+
+        @client.command(name='queue')
+        async def queue(ctx, url):
+            if ctx.guild.id not in queues:
+                queues[ctx.guild.id] = []
+            queues[ctx.guild.id].append(url)
+            await ctx.send('Song added to queue!')
+
+        @client.command(name='clear_queue')
+        async def clear_queue(ctx):
+            if ctx.guild.id in queues:
+                queues[ctx.guild.id].clear()
+                await ctx.send('Queue cleared!')
+            else:
+                ctx.send("There is no queue to clear!")
+
+        @client.command(name='help')
+        async def help(ctx):
             try:
                 help_message = dedent('''
                     General commands:
@@ -43,47 +103,9 @@ def run_bot():
                     **?resume** - resume the current song
                     **?stop** - stop the current song and disconnect the bot
                 ''')
-                await message.channel.send(help_message)
-            except Exception as e:
-                print(e)
-
-        if message.content.startswith('?play'):
-            try:
-                voice_client = await message.author.voice.channel.connect()
-                voice_clients[voice_client.guild.id] = voice_client
-            except Exception as e:
-                print(e)
-            try:
-                # ?play link, 0 index, 1 index
-                url = message.content.split()[1]
-
-                loop = asyncio.get_event_loop()
-                data = await loop.run_in_executor(None, lambda: ytdl.extract_info(url, download=False))
-                
-                song = data['url']
-                player = discord.FFmpegOpusAudio(song, **ffmpeg_options)
-
-                voice_clients[message.guild.id].play(player)
+                await ctx.channel.send(help_message)
             except Exception as e:
                 print(e)
             
-        if message.content.startswith('?pause'):
-            try:
-                voice_clients[message.guild.id].pause()
-            except Exception as e:
-                print(e)
-
-        if message.content.startswith('?resume'):
-            try:
-                voice_clients[message.guild.id].resume()
-            except Exception as e:
-                print(e)
-
-        if message.content.startswith('?stop'):
-            try:
-                voice_clients[message.guild.id].stop()
-                await voice_clients[message.guild.id].disconnect()
-            except Exception as e:
-                print(e)
 
     client.run(TOKEN)
